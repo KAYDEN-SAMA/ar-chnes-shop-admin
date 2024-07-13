@@ -35,6 +35,8 @@ onAuthStateChanged(auth, user => {
   }
 });
 
+let selectedOffer = localStorage.getItem('selectedOffer') || "usernameOffers";
+
 function loadUserData(user) {
   const adminUid = user.uid;
   get(ref(db, `admins/${adminUid}`)).then(adminSnapshot => {
@@ -67,11 +69,14 @@ function loadOfferData(selectedOffer) {
   const dialog = document.createElement('div');
 dialog.innerHTML = `<div class="dialog">
     <label for="title">العنوان:</label>
-    <input type="text" id="title" placeholder="العنوان" maxlength="24">
+    <input type="text" id="title" placeholder="العنوان" maxlength="12">
     <label for="">الوصف:</label>
-    <input type="text" id="description" placeholder="الوصف" maxlength="60">
+    <input type="text" id="description" placeholder="الوصف" maxlength="50">
     <label for="price">السعر:</label>
     <input type="number" id="price" placeholder="السعر">
+    <label for="cover">رفع الصورة:</label>
+    <input type="file" id="coverInput" accept="image/*">
+    <img id="coverPreview" style="display: none; max-width: 100%;" alt="Cover Preview">
     <p id="errorElm"></p>
     <div class="buttons-div">
       <button id="confirmBtn">تأكيد</button>
@@ -83,14 +88,29 @@ document.body.classList.add('modal-open');
 
 const confirmBtn = document.getElementById('confirmBtn');
 const cancelBtn = document.getElementById('cancelBtn');
+const coverInput = document.getElementById('coverInput');
+const coverPreview = document.getElementById('coverPreview');
 const errorElm = document.getElementById('errorElm');
 
+coverInput.addEventListener('change', function(event) {
+  coverPreview.style.display = "block";
+  const coverImageFile = event.target.files[0];
+  if (coverImageFile && coverImageFile.type.match('image.*')) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      coverPreview.src = e.target.result;
+    };
+    reader.readAsDataURL(coverImageFile);
+  } else {
+    errorElm.textContent = "يرجى اختيار صورة للغلاف";
+    coverPreview.style.display = "none";
+  }
+});
   confirmBtn.addEventListener('click', async () => {
     const titleInput = document.getElementById('title');
     const descriptionInput = document.getElementById('description');
     const priceInput = document.getElementById('price');
-    const secondPriceInput = document.getElementById('second-price')
-
+    
     const title = titleInput.value.trim();
     const description = descriptionInput.value.trim();
     const price = priceInput.value.trim();
@@ -100,12 +120,20 @@ const errorElm = document.getElementById('errorElm');
       return;
     }
 
+    if (!coverInput.files[0]) {
+      errorElm.textContent = "يرجى اختيار صورة للغلاف";
+      return;
+    }
+
     try {
+      const imgbbApiKey = 'd98a68519cc003fe23344c3fe41b693d';
+      const imageUrl = await uploadImage(imgbbApiKey, coverInput.files[0]);
       const newOfferRef = ref(db, `shop/${title}`);
       set(newOfferRef, {
         title: title,
         description: description,
-        price: price
+        price: price,
+        cover: imageUrl,
       }).then(() => {
         alert('تم إضافة العرض بنجاح!');
         dialog.remove();
@@ -114,7 +142,8 @@ const errorElm = document.getElementById('errorElm');
         alert('حصل خطأ أثناء إضافة العرض: ' + error.message);
       });
     } catch (error) {
-      errorElm.textContent = "حدث خطأ أثناء إضافة العرض ";
+      console.error('Error uploading image:', error);
+      errorElm.textContent = "حدث خطأ أثناء رفع الصورة";
     }
   });
 
@@ -160,6 +189,26 @@ const errorElm = document.getElementById('errorElm');
   });
 }
 
+async function uploadImage(apiKey, imageFile) {
+  const imgbbApiUrl = 'https://api.imgbb.com/1/upload';
+  const formData = new FormData();
+  formData.append('key', apiKey);
+  formData.append('image', imageFile);
+
+  const response = await fetch(imgbbApiUrl, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const json = await response.json();
+  if (json.success) {
+    return json.data.url;
+  } else {
+    throw new Error('Image upload failed');
+  }
+}
+
+
 function createofferCard(offerId, offerData) {
   const card = document.createElement("div");
   const titleDiv = document.createElement("div");
@@ -172,6 +221,11 @@ function createofferCard(offerId, offerData) {
   const priceTitle = document.createElement("h3");
   const priceEl = document.createElement("p");
   
+  const coverDiv = document.createElement("div");
+  const coverTitle = document.createElement("h3");
+  const coverEl = document.createElement("p");
+  const coverImg = document.createElement("img"); 
+  
   const iconsDiv = document.createElement("div");
   const deleteBtn = document.createElement("i");
   const editBtn = document.createElement("i");
@@ -180,6 +234,7 @@ function createofferCard(offerId, offerData) {
   titleEl.className = "offer-title";
   descriptionEl.className = "offer-description";
   priceEl.className = "offer-price";
+  coverDiv.className = "cover-div"
   deleteBtn.className = "fa-solid fa-trash";
   editBtn.className = "fa-solid fa-pen";
   
@@ -192,9 +247,15 @@ function createofferCard(offerId, offerData) {
   priceTitle.textContent = "السعر: ";
   priceEl.textContent = offerData.price;
   
+  
+  
+  coverTitle.textContent =  "الصورة:";
+  coverEl.textContent = offerData.cover;
+  coverImg.src = offerData.cover;
+  
   deleteBtn.onclick = function() {
     if (confirm("متأكد من حذف هذا العرض؟")) {
-      const offerRef = ref(db, `shop/${offerId}`);
+      const offerRef = ref(db, `shop/${selectedOffer}/${offerId}`);
       set(offerRef, null)
         .then(() => {
           alert('لقد تم حذف العرض بنجاح')
@@ -212,6 +273,7 @@ function createofferCard(offerId, offerData) {
       titleEl.contentEditable = true;
       descriptionEl.contentEditable = true;
       priceEl.contentEditable = true;
+      coverEl.contentEditable = true;
       editBtn.className = "fa-solid fa-floppy-disk";
       isEditable = true;
     } else {
@@ -220,10 +282,12 @@ function createofferCard(offerId, offerData) {
         title: titleEl.textContent,
         description: descriptionEl.textContent,
         price: priceValue,
+        cover: coverEl.textContent,
       });
       titleEl.contentEditable = false;
       descriptionEl.contentEditable = false;
       priceEl.contentEditable = false;
+      coverEl.contentEditable = false;
       editBtn.className = "fa-solid fa-pen";
       isEditable = false;
     }
@@ -234,11 +298,15 @@ function createofferCard(offerId, offerData) {
   descriptionDiv.appendChild(descriptionEl);
   priceDiv.appendChild(priceTitle);
   priceDiv.appendChild(priceEl);
+  coverDiv.appendChild(coverTitle);
+  coverDiv.appendChild(coverEl)
+  coverDiv.appendChild(coverImg);
   iconsDiv.appendChild(deleteBtn);
   iconsDiv.appendChild(editBtn);
   card.appendChild(titleDiv);
   card.appendChild(descriptionDiv);
   card.appendChild(priceDiv);
+  card.appendChild(coverDiv);
   card.appendChild(iconsDiv);
   dataSection.appendChild(card);
 }
